@@ -5,28 +5,58 @@
 // RW is tied to GND (write-only), so the LCD never drives 5V into the ESP32.
 LiquidCrystal lcd(32, 33, 25, 26, 27, 14);
 
-unsigned long lastUpdateMs = 0;
+// Machine signal simulated by a push button between GPIO13 and GND.
+// INPUT_PULLUP keeps the pin HIGH when released; pressing pulls it LOW.
+const uint8_t MACHINE_PIN = 13;
+const unsigned long DEBOUNCE_MS = 30;
+
+bool machineRunning = false;
+bool lastRawReading = HIGH;
+unsigned long lastRawChangeMs = 0;
+unsigned long stateSinceMs = 0;
+unsigned long lastScreenMs = 0;
+
+void showState() {
+  lcd.setCursor(0, 0);
+  lcd.print(machineRunning ? "RUNNING         " : "STOPPED         ");
+}
+
+void updateMachineState() {
+  bool raw = digitalRead(MACHINE_PIN);
+  if (raw != lastRawReading) {
+    lastRawReading = raw;
+    lastRawChangeMs = millis();
+  }
+
+  // Accept the new level only after it has been stable for DEBOUNCE_MS
+  bool running = (lastRawReading == LOW);
+  if (running != machineRunning && millis() - lastRawChangeMs >= DEBOUNCE_MS) {
+    machineRunning = running;
+    stateSinceMs = millis();
+    Serial.println(machineRunning ? "Machine started" : "Machine stopped");
+    showState();
+  }
+}
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Hello Polimax!");
+  Serial.println("Polimax machine monitor");
+
+  pinMode(MACHINE_PIN, INPUT_PULLUP);
 
   lcd.begin(16, 2);
-  lcd.print("Hello Polimax!");
+  showState();
 }
 
 void loop() {
-  // Non-blocking: update the uptime once per second without delay()
-  if (millis() - lastUpdateMs >= 1000) {
-    lastUpdateMs = millis();
-    unsigned long seconds = millis() / 1000;
+  updateMachineState();
 
+  // Non-blocking: refresh the timer line once per second without delay()
+  if (millis() - lastScreenMs >= 1000) {
+    lastScreenMs = millis();
     lcd.setCursor(0, 1);
-    lcd.print("Uptime: ");
-    lcd.print(seconds);
-    lcd.print("s   ");
-
-    Serial.print("Uptime: ");
-    Serial.println(seconds);
+    lcd.print("for ");
+    lcd.print((millis() - stateSinceMs) / 1000);
+    lcd.print("s        ");
   }
 }
